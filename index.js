@@ -124,7 +124,7 @@ async function syncNotionDatabaseWithGoodReads() {
     return pages.map(page => {
         return {
           pageId: page.id,
-          bookId: page.properties?.Book_ID?.number,
+          bookId: page.properties?.["Book ID"]?.number,
         }
       })
   } 
