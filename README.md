@@ -6,13 +6,13 @@
 
 This Notion integration syncs books from Goodreads RSS feed to a Notion Database. This integration was built using this [database template](https://chalk-brake-f8e.notion.site/e3ecc052502d4400ae0c4aed84e238a1?v=4729ecf5e601419897daf45c3f901d0f) and [Cheerio](https://cheerio.js.org/). Changes made to to the following properties in the Notion database will be overwritten by changes on GoodReads:
 > - Page
->  - Cover
+>   - Cover
 > - Properties
->  - Book ID
->  - Book ISBN
->  - Author
->  - Shelf
->  - Date
+>   - Book ID
+>   - Book ISBN
+>   - Author
+>   - Shelf
+>   - Date
 
 ## Running Locally
 
