@@ -22,7 +22,7 @@ const OPERATION_BATCH_SIZE = 25;
 
 /**
  * Local map to store  GoodReads ID to its Notion pageId.
- * { [bookId: string]: string }
+ * { [bookId: string]: {pageId: string, shelves: string }
  */
  const goodReadsIdToNotionPageId = {}
 
@@ -37,26 +37,26 @@ setInitialGoodReadsToNotionIdMap().then(syncNotionDatabaseWithGoodReads)
  */
 async function setInitialGoodReadsToNotionIdMap() {
   const currentBooks = await getBooksFromNotionDatabase()
-  for (const { pageId, bookId } of currentBooks) {
-    goodReadsIdToNotionPageId[bookId] = pageId
+  for (const { pageId, bookId, shelves } of currentBooks) {
+    goodReadsIdToNotionPageId[bookId] = { pageId, shelves}
   }
 }
 
 async function syncNotionDatabaseWithGoodReads() {
     // Get all books from GoodReads
-    console.log("\`\n📚 Fetching books from GoodReads...")
+    console.log("\n📚 Fetching books from GoodReads...")
     const books = await getBooksFromGoodreads();
-    console.log(`\n📚 ${books.length} books successfully retrieved from GoodReads`);
+    console.log(`\n📥 ${books.length} books successfully retrieved from GoodReads`);
   
     // Group books into those that need to be created or updated in the Notion database.
     const { pagesToCreate, pagesToUpdate } = getNotionOperations(books)
   
     // Create pages for new books.
-    console.log(`\n${pagesToCreate.length} new books to add to Notion.`)
+    console.log(`\n📚 ${pagesToCreate.length} new books to add to Notion.`)
    await createPages(pagesToCreate)
   
     // Updates pages for existing books.
-    console.log(`\n${pagesToUpdate.length} books to update in Notion.`)
+    console.log(`\n📚 ${pagesToUpdate.length} books to update in Notion.`)
     await updatePages(pagesToUpdate)
   
     // Success!
@@ -68,7 +68,7 @@ async function syncNotionDatabaseWithGoodReads() {
 /**
  * Gets books from GoodReads
  *
- * @returns {Promise<Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string }>>}
+ * @returns {Promise<Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string, img: string }>>}
  */
  async function getBooksFromGoodreads(){
     const books = [];
@@ -79,7 +79,9 @@ async function syncNotionDatabaseWithGoodReads() {
             const $ = cheerio.load(str);
 
             const shelf = $('title').first().text();
-            console.log(`\n📚 Fetching books from: `+ shelf);
+            console.log(`\n🔎 Fetching books from: `+ shelf);
+            const lastBuildDate = $('lastBuildDate').text();
+            console.log('\n📜 Last RSS Build date: '+formatBuildDate(lastBuildDate))
       
             const items = $('item');
             for (const item of items){
@@ -91,7 +93,7 @@ async function syncNotionDatabaseWithGoodReads() {
                     author_name:$('author_name').text(),
                     user_date_created: parseDate($('user_date_created').html()),
                     user_read_at: parseDate($('user_read_at').html()),
-                    shelves: $('user_shelves').text(),
+                    shelves: ($('user_shelves').text() ? $('user_shelves').text() : "read"),
                     img: removeCDATA($('book_large_image_url').html())
                  });
                  
@@ -104,9 +106,10 @@ async function syncNotionDatabaseWithGoodReads() {
 /**
  * Gets pages from the Notion database.
  *
- * @returns {Promise<Array<{ pageId: string, bookId: number }>>}
+ * @returns {Promise<Array<{ pageId: string, bookId: number, shelves: string }>>}
  */
  async function getBooksFromNotionDatabase() {
+  console.log("\`\n📚 Fetching books from Notion...")
     const pages = [];
     let cursor = undefined
     while (true) {
@@ -120,11 +123,12 @@ async function syncNotionDatabaseWithGoodReads() {
       }
       cursor = next_cursor
     }
-    console.log(`\n📚 ${pages.length} books successfully fetched.`)
+    console.log(`\n📥 ${pages.length} books successfully retrieved from Notion.`)
     return pages.map(page => {
         return {
           pageId: page.id,
           bookId: page.properties?.["Book ID"]?.number,
+          shelves: page.properties?.["Shelf"].multi_select?.[0]?.name
         }
       })
   } 
@@ -132,10 +136,10 @@ async function syncNotionDatabaseWithGoodReads() {
 /**
  * Determines which books already exist in the Notion database.
  *
- * @param {Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string }>} books
+ * @param {Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string, img: string }>} books
  * @returns {{
- *  pagesToCreate: Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string };
- *  pagesToUpdate: Array<{ pageId: string, book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string }
+ *  pagesToCreate: Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string, img: string }>
+ *  pagesToUpdate: Array<{ pageId: string, book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string, img: string}>
  * }}   
  */
 
@@ -143,12 +147,15 @@ async function syncNotionDatabaseWithGoodReads() {
     const pagesToCreate = []
     const pagesToUpdate = []
     for (const book of books) {
-      const pageId = goodReadsIdToNotionPageId[book.book_id]
-      if (pageId) {
-        pagesToUpdate.push({
-          ...book,
-          pageId,
+      const pageMap = goodReadsIdToNotionPageId[book.book_id]
+      if (Boolean(pageMap?.['pageId'])) {
+        if(pageMap?.shelves != book?.shelves){
+          pageId = (pageMap['pageId'])
+          pagesToUpdate.push({
+            ...book,
+            pageId,
         })
+      }
       } else {
         pagesToCreate.push(book)
       }
@@ -160,7 +167,7 @@ async function syncNotionDatabaseWithGoodReads() {
  *
  * https://developers.notion.com/reference/post-page
  *
- * @param {Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string }>} pagesToCreate
+ * @param {Array<{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string, img: string }>} pagesToCreate
  */
  async function createPages(pagesToCreate) {
     const pagesToCreateChunks = _.chunk(pagesToCreate, OPERATION_BATCH_SIZE)
@@ -188,7 +195,7 @@ async function syncNotionDatabaseWithGoodReads() {
    *
    * https://developers.notion.com/reference/patch-page
    *
-   * @param {Array<{ pageId: string, book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string }>} pagesToUpdate
+   * @param {Array<{ pageId: string, book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string, img: string}>} pagesToUpdate
    */
   async function updatePages(pagesToUpdate) {
     const pagesToUpdateChunks = _.chunk(pagesToUpdate, OPERATION_BATCH_SIZE)
@@ -218,7 +225,8 @@ async function syncNotionDatabaseWithGoodReads() {
 /**
  * Removes CDATA labels from RSS feed
  *
- * @param {string} str
+ * @param {string} str 
+ * @returns {string} 
  */
 function removeCDATA(str) {
     return (str.match(/\[CDATA\[(.*?)\]/) ? str.match(/\[CDATA\[(.*?)\]/)?.[1] : str)
@@ -228,21 +236,44 @@ function removeCDATA(str) {
 /**
  * Parse date into correct ISO string
  * 
- * @param {string} str 
- * @returns 
+ * @param {string} str unformatted date string
+ * @returns {string} Formatted ISO string
  */
 
 function parseDate(str){
     str = removeCDATA(str)
     if(Date.parse(str)) {
         str = new Date(str);
-        return str.toISOString().split('T')[0]; //Split at T to remove time & timezone
+        return str.toISOString().split('T')[0]; 
     }
     return null
 }
 
 /**
+ * Calculates last build time in minutes/hours
+ * 
+ * @param {string} lastBuildtime 
+ * @returns {string}
+ */
+
+function formatBuildDate(lastBuildtime){
+  if(Date.parse(lastBuildtime)) {;
+    diff = new Date().getTime() - new Date(lastBuildtime);
+    if (diff < 3600000) {
+      lastUpdated = `${Math.floor(diff / 60000)} minutes ago`;
+    } else if (diff < 86400000) {
+      lastUpdated = `${Math.floor(diff / 3600000)} hours ago`;
+    } else {
+      lastUpdated = `${Math.floor(diff / 86400000)} days ago`;
+    }
+    return lastUpdated;
+  } 
+return null
+}
+
+/**
  * Returns the Book item conform database's schema properties.
+ * For some reason the 'read' shelve shows as an empty string on the RSS, hence the fallback to 'read'
  *
  * @param {{ book_id: string, book_isbn: title: string, author_name: string, user_date_created: string, user_read_at: string, shelves: string }} book
  */
@@ -262,7 +293,7 @@ function parseDate(str){
         rich_text: [{ type: 'text', text:{ content: author_name}}]
       },
       "Shelf": (shelves) ? {
-        multi_select:[{name: shelves }]} : { multi_select:[{ name: 'read'}]
+        multi_select:[{name: shelves }]} : { multi_select:[{ name: "read"}]
         },
         "Date" : {
             date: {
